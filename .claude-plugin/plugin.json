@@ -1,0 +1,43 @@
+{
+  "name": "pulso",
+  "description": "Five-line Claude Code statusline: tokens, model + reasoning effort + thinking + Claude Code version, session rate-limits + cost + diff impact + duration, MCP and hook counts, and a soft-wrapped enabled-skills list with active-skill highlight. Auto-wires on SessionStart -- no manual install step.",
+  "version": "1.3.0",
+  "author": {
+    "name": "Orlando Molina",
+    "url": "https://github.com/ojesusmp"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/ojesusmp/pulso",
+  "repository": "https://github.com/ojesusmp/pulso",
+  "keywords": [
+    "statusline",
+    "claude-code",
+    "hud",
+    "tokens",
+    "context-window",
+    "model",
+    "reasoning-effort",
+    "thinking",
+    "rate-limits",
+    "cost",
+    "mcp",
+    "hooks",
+    "skills",
+    "ui",
+    "observability"
+  ],
+  "skills": ["./skills/pulso"],
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/pulso/install.mjs\" --hook",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}
