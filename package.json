@@ -1,6 +1,6 @@
 {
   "name": "pulso",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "Five-line Claude Code statusline: tokens, model + reasoning effort + thinking, session rate-limits + cost + diff impact, MCP and hook counts, and a soft-wrapped enabled-skills list with active-skill highlight. Distributed via Claude Code marketplace, curl|bash, or npx.",
   "type": "module",
   "bin": {

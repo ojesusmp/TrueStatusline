@@ -1,23 +1,27 @@
 #!/usr/bin/env node
 // PERMANENT - pulso
-// pulso v1.3.0
+// pulso v1.4.0
 /**
  * pulso — Claude Code statusline.
  * Author: Orlando Molina <https://github.com/ojesusmp>
  * License: MIT
  *
  * Layout (top -> bottom):
- *   1. token line:   tok cached/new/total ctx mcp hk
- *   2. model line:   mdl:<Name>[<ver>][1m] vX.Y.Z fx:<effort> think:on style:<name>
- *   3. session line: 5h:NN% (in Xh)  7d:NN% (in Xd)  $cost  +adds/-dels  duration
+ *   1. token line:   tok cached/new/total [ctx] mcp hk
+ *   2. model line:   [mdl:<Name>[<ver>]] vX.Y.Z[1m] fx:<effort> think:on style:<name>
+ *   3. session line: [5h:NN% (in Xh)  7d:NN% (in Xd)]  $cost  +adds/-dels  [duration]
  *   4. OMC HUD line (if oh-my-claudecode plugin is installed; otherwise omitted)
  *   5. skills line:  full plugin list, soft-wrapped to terminal width, with
  *                    bold cyan highlight on the most-recently-active skill plus a
  *                    [active: <name>] tail.
  *
- * Lines 2 and 3 are skipped silently when the upstream JSON omits the
- * relevant fields (e.g., free-tier accounts have no rate_limits, models
- * without effort omit effort.level, etc.).
+ * De-duplication: when the OMC HUD line (4) is present it owns the model name,
+ * ctx%, 5h/7d rate limits, and session duration, so pulso omits those from
+ * lines 1-3 (the bracketed fields above) and shows only what the HUD does not
+ * (token breakdown, CC version, [1m], effort, thinking, cost, diff). In
+ * standalone mode (no HUD) all fields render. Lines 2 and 3 are also skipped
+ * silently when the upstream JSON omits the relevant fields (e.g., free-tier
+ * accounts have no rate_limits, models without effort omit effort.level).
  *
  * Design notes:
  *   - Skills line at BOTTOM so a long plugin list does not push the
@@ -26,10 +30,13 @@
  *   - HUD delegation runs as a child process (spawnSync) so its output is
  *     guaranteed to flush before the skills line is printed.
  *   - Silent fail on any error -- never breaks statusline rendering.
+ *   - Diagnostic capture is opt-in: set PULSO_DEBUG=1 to dump the raw
+ *     statusline stdin to PULSO_DEBUG_FILE (default /tmp/pulso-stdin.json)
+ *     on each render. Off by default so normal renders never touch disk.
  */
 
-import { existsSync, readdirSync, readFileSync, statSync, openSync, readSync, closeSync } from "node:fs";
-import { homedir } from "node:os";
+import { existsSync, readdirSync, readFileSync, statSync, openSync, readSync, closeSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 
@@ -61,6 +68,23 @@ async function bufferStdin() {
 function parseJsonSafe(raw) {
   if (!raw) return null;
   try { return JSON.parse(raw); } catch { return null; }
+}
+
+// Opt-in diagnostic capture. Dumps the raw statusline stdin so the exact
+// keys the running CC build sends can be inspected. Enabled by EITHER:
+//   - a live sentinel file (<config>/.pulso-debug) -- toggle with touch/rm,
+//     takes effect on the next render, no restart needed; or
+//   - PULSO_DEBUG=1 in the environment (set in settings.json, applies on
+//     the next CC launch).
+// Silent-fail so it can never break rendering.
+function writeDiagnostic(raw) {
+  const configDir = process.env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude");
+  const enabled = process.env.PULSO_DEBUG === "1" || existsSync(join(configDir, ".pulso-debug"));
+  if (!enabled) return;
+  try {
+    const path = process.env.PULSO_DEBUG_FILE || join(tmpdir(), "pulso-stdin.json");
+    writeFileSync(path, raw ?? "", "utf8");
+  } catch { /* never break the statusline */ }
 }
 
 function readEnabledPlugins() {
@@ -256,7 +280,7 @@ function printSkillsLine(active) {
   process.stdout.write(line + "\n");
 }
 
-function printTokenLine(stdin, mcpCount, hkCount) {
+function printTokenLine(stdin, mcpCount, hkCount, hudShown) {
   const usage = stdin?.context_window?.current_usage || {};
   const cached = usage.cache_read_input_tokens || 0;
   const fresh = (usage.input_tokens || 0) + (usage.cache_creation_input_tokens || 0);
@@ -269,17 +293,17 @@ function printTokenLine(stdin, mcpCount, hkCount) {
     `${wrap(C.dim, "new:")}${wrap(C.yellow, fmtNum(fresh))}`,
     `${wrap(C.dim, "total:")}${wrap(C.white, fmtNum(total))}`,
   ];
-  if (ctxPct != null) parts.push(`${wrap(C.dim, "ctx:")}${wrap(ctxColor, ctxPct + "%")}`);
+  // ctx% is shown by the OMC HUD line; only render it here in standalone mode.
+  if (!hudShown && ctxPct != null) parts.push(`${wrap(C.dim, "ctx:")}${wrap(ctxColor, ctxPct + "%")}`);
   parts.push(`${wrap(C.dim, "mcp:")}${wrap(C.magenta, mcpCount + "x")}`);
   parts.push(`${wrap(C.dim, "hk:")}${wrap(C.gray, hkCount + "x")}`);
   process.stdout.write(parts.join(" ") + "\n");
 }
 
-function printModelLine(stdin) {
+function printModelLine(stdin, hudShown) {
   const model = stdin?.model;
-  if (!model) return;
-  const name = model.display_name || model.id || "?";
-  const ver = parseModelVersion(model.id);
+  const name = model ? (model.display_name || model.id || "?") : null;
+  const ver = parseModelVersion(model?.id);
   const ctxSize = stdin?.context_window?.context_window_size;
   const is1m = ctxSize === 1_000_000;
   const effort = stdin?.effort?.level;
@@ -288,31 +312,46 @@ function printModelLine(stdin) {
   const ccVer = stdin?.version;
 
   const parts = [];
-  let mdl = `${C.bold}${C.cyan}${name}${ver ? " " + ver : ""}${C.reset}`;
-  if (is1m) mdl += wrap(C.yellow, "[1m]");
-  parts.push(`${wrap(C.dim, "mdl:")}${mdl}`);
-  if (ccVer) parts.push(`${wrap(C.dim, "v")}${wrap(C.gray, ccVer)}`);
+  let oneMShown = false;
+  // The OMC HUD line already shows the model name; in standalone mode pulso
+  // renders it (with the [1m] badge attached). When the HUD is present we omit
+  // the name and attach [1m] to the CC version instead so the badge survives.
+  if (!hudShown && name) {
+    const verSuffix = ver && !name.includes(ver) ? " " + ver : "";
+    let mdl = `${C.bold}${C.cyan}${name}${verSuffix}${C.reset}`;
+    if (is1m) { mdl += wrap(C.yellow, "[1m]"); oneMShown = true; }
+    parts.push(`${wrap(C.dim, "mdl:")}${mdl}`);
+  }
+  if (ccVer) {
+    let v = `${wrap(C.dim, "v")}${wrap(C.gray, ccVer)}`;
+    if (is1m && !oneMShown) { v += wrap(C.yellow, "[1m]"); oneMShown = true; }
+    parts.push(v);
+  }
+  if (is1m && !oneMShown) parts.push(wrap(C.yellow, "[1m]"));
   if (effort) parts.push(`${wrap(C.dim, "fx:")}${wrap(effortColor(effort), effort)}`);
   if (thinking != null) {
     parts.push(`${wrap(C.dim, "think:")}${thinking ? wrap(C.green, "on") : wrap(C.gray, "off")}`);
   }
   if (style && style !== "default") parts.push(`${wrap(C.dim, "style:")}${wrap(C.cyan, style)}`);
-  process.stdout.write(parts.join(" ") + "\n");
+  if (parts.length) process.stdout.write(parts.join(" ") + "\n");
 }
 
-function printSessionLine(stdin) {
+function printSessionLine(stdin, hudShown) {
   const cost = stdin?.cost || {};
   const rl = stdin?.rate_limits || {};
   const parts = [];
 
-  if (rl.five_hour) {
+  // Rate limits and session duration are shown by the OMC HUD line; render
+  // them here only in standalone mode. Cost and diff are pulso-only and always
+  // shown (the HUD reports neither).
+  if (!hudShown && rl.five_hour) {
     const p = rl.five_hour.used_percentage;
     const r = fmtCountdown(rl.five_hour.resets_at);
     let s = `${wrap(C.dim, "5h:")}${wrap(pctColor(p), (p != null ? p.toFixed(0) : "?") + "%")}`;
     if (r) s += ` ${wrap(C.gray, "(" + r + ")")}`;
     parts.push(s);
   }
-  if (rl.seven_day) {
+  if (!hudShown && rl.seven_day) {
     const p = rl.seven_day.used_percentage;
     const r = fmtCountdown(rl.seven_day.resets_at);
     let s = `${wrap(C.dim, "7d:")}${wrap(pctColor(p), (p != null ? p.toFixed(0) : "?") + "%")}`;
@@ -329,8 +368,10 @@ function printSessionLine(stdin) {
   if (adds != null || dels != null) {
     parts.push(`${wrap(C.green, "+" + (adds || 0))}${wrap(C.dim, "/")}${wrap(C.red, "-" + (dels || 0))}`);
   }
-  const dur = fmtDuration(cost.total_duration_ms);
-  if (dur) parts.push(wrap(C.white, dur));
+  if (!hudShown) {
+    const dur = fmtDuration(cost.total_duration_ms);
+    if (dur) parts.push(wrap(C.white, dur));
+  }
 
   if (parts.length) process.stdout.write(parts.join("  ") + "\n");
 }
@@ -359,8 +400,7 @@ function findHudPath() {
   return null;
 }
 
-function runHudSync(rawStdin) {
-  const hudPath = findHudPath();
+function runHudSync(rawStdin, hudPath) {
   if (!hudPath) return false;
   try {
     const res = spawnSync(process.execPath, [hudPath], {
@@ -376,13 +416,19 @@ function runHudSync(rawStdin) {
 
 async function main() {
   const raw = await bufferStdin();
+  writeDiagnostic(raw);
   const stdin = parseJsonSafe(raw);
   const inspect = inspectTranscript(stdin?.transcript_path);
 
-  printTokenLine(stdin, inspect.mcpCount, inspect.hkCount);
-  printModelLine(stdin);
-  printSessionLine(stdin);
-  runHudSync(raw);
+  // When the OMC HUD line is present it owns model/ctx/rate-limits/duration,
+  // so pulso drops those to avoid duplication; standalone, pulso shows them.
+  const hudPath = findHudPath();
+  const hudShown = hudPath != null;
+
+  printTokenLine(stdin, inspect.mcpCount, inspect.hkCount, hudShown);
+  printModelLine(stdin, hudShown);
+  printSessionLine(stdin, hudShown);
+  runHudSync(raw, hudPath);
   printSkillsLine(inspect.lastSkill);
 }
 

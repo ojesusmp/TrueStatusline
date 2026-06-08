@@ -2,6 +2,20 @@
 
 All notable changes to pulso are documented in this file. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] — 2026-06-08
+
+### Added
+
+- **Opt-in diagnostic capture** — dumps the raw statusline stdin JSON so the exact keys a given Claude Code build sends can be inspected. Enabled by either a live sentinel file (`<config>/.pulso-debug`, toggled with `touch`/`rm`, effective on the next render with no restart) or the `PULSO_DEBUG=1` environment variable. Output path defaults to `/tmp/pulso-stdin.json`, overridable via `PULSO_DEBUG_FILE`. Off by default — normal renders never touch disk. Silent-fail so it can never break rendering.
+
+### Changed
+
+- **De-duplication against the OMC HUD line.** When the oh-my-claudecode HUD line is present, pulso now omits the fields the HUD already shows — model name (line 2), `ctx%` (line 1), `5h`/`7d` rate limits and session duration (line 3) — and renders only what the HUD does not (token breakdown, CC version, `[1m]`, effort, thinking, cost, diff). In standalone mode (no HUD) all fields render as before. The `[1m]` badge now attaches to the CC version when the model name is omitted, so it always remains visible.
+
+### Fixed
+
+- **Duplicated model version** on the model line (e.g. `Opus 4.8 4.8`). The parsed `model.id` version is now appended only when `model.display_name` does not already contain it, so display names that already include the version render once.
+
 ## [1.3.0] — 2026-05-09
 
 Initial release of `pulso` — the rebrand of the earlier `oj-statusline` plugin, with new model and session lines and a multi-channel installer.

@@ -16,6 +16,8 @@ skills: pulso · oh-my-claudecode · silex · ... [active: pulso]
 
 Lines 2–4 collapse silently when their data is absent — free tier sees fewer rows; Opus 1M-context user sees them all.
 
+When the oh-my-claudecode HUD line is present, pulso de-duplicates against it: the fields the HUD already shows (model name, `ctx%`, `5h`/`7d` rate limits, session duration) are dropped from pulso's own lines, leaving only what the HUD doesn't render (token breakdown, CC version, `[1m]`, effort, thinking, cost, diff). Without the HUD, pulso shows everything (as in the example above).
+
 ## Why
 
 Default Claude Code statusline shows a working directory and not much else. For someone running Claude Code as their daily driver, the genuinely useful state lives in the JSON the harness already passes to your statusline command: model variant, reasoning effort, thinking toggle, rate-limit usage with countdown to reset, session cost and diff impact, and per-turn MCP/hook activity. Pulso renders all of that, color-coded, in a layout that survives narrow terminals.
@@ -85,6 +87,20 @@ All field names map 1:1 to the [Claude Code statusLine docs](https://code.claude
 ## Slash command
 
 After install, `/pulso:setup` re-runs the installer in verbose mode and walks the user through the restart cycle. Use it if the SessionStart hook didn't fire or to recover from a broken statusline.
+
+## Diagnostics
+
+To inspect the exact statusline JSON your Claude Code build sends pulso (useful when a field doesn't render), enable opt-in capture. It dumps the raw stdin to `/tmp/pulso-stdin.json` (override with `PULSO_DEBUG_FILE`) on each render. Off by default — normal renders never touch disk.
+
+```sh
+# Live toggle — effective on the next render, no restart:
+touch ~/.claude/.pulso-debug      # on
+cat /tmp/pulso-stdin.json         # inspect after the statusline repaints
+rm   ~/.claude/.pulso-debug       # off
+
+# Static toggle — set in settings.json env, applies on next launch:
+#   "env": { "PULSO_DEBUG": "1" }
+```
 
 ## Uninstall
 
