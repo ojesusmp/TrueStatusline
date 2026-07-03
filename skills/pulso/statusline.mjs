@@ -1,27 +1,31 @@
 #!/usr/bin/env node
 // PERMANENT - pulso
-// pulso v1.4.0
+// pulso v1.5.0
 /**
  * pulso — Claude Code statusline.
  * Author: Orlando Molina <https://github.com/ojesusmp>
  * License: MIT
  *
  * Layout (top -> bottom):
- *   1. token line:   tok cached/new/total [ctx] mcp hk
+ *   1. token line:   host:path + tok cached/new/total [ctx] mcp hk
  *   2. model line:   [mdl:<Name>[<ver>]] vX.Y.Z[1m] fx:<effort> think:on style:<name>
  *   3. session line: [5h:NN% (in Xh)  7d:NN% (in Xd)]  $cost  +adds/-dels  [duration]
- *   4. OMC HUD line (if oh-my-claudecode plugin is installed; otherwise omitted)
- *   5. skills line:  full plugin list, soft-wrapped to terminal width, with
+ *   4. mem line:     biggest single node/claude process + totals (Windows tasklist;
+ *                    silently absent on platforms without tasklist)
+ *   5. OMC HUD line (if oh-my-claudecode plugin is installed; otherwise omitted)
+ *   6. skills line:  full plugin list, soft-wrapped to terminal width, with
  *                    bold cyan highlight on the most-recently-active skill plus a
  *                    [active: <name>] tail.
  *
- * De-duplication: when the OMC HUD line (4) is present it owns the model name,
+ * De-duplication: when the OMC HUD line (5) is present it owns the model name,
  * ctx%, 5h/7d rate limits, and session duration, so pulso omits those from
  * lines 1-3 (the bracketed fields above) and shows only what the HUD does not
  * (token breakdown, CC version, [1m], effort, thinking, cost, diff). In
  * standalone mode (no HUD) all fields render. Lines 2 and 3 are also skipped
  * silently when the upstream JSON omits the relevant fields (e.g., free-tier
- * accounts have no rate_limits, models without effort omit effort.level).
+ * accounts have no rate_limits, models without effort omit effort.level). The
+ * host:path prefix (line 1) and mem line (4) are independent of HUD dedup —
+ * the HUD shows neither, so both always render when their own data exists.
  *
  * Design notes:
  *   - Skills line at BOTTOM so a long plugin list does not push the
@@ -33,10 +37,13 @@
  *   - Diagnostic capture is opt-in: set PULSO_DEBUG=1 to dump the raw
  *     statusline stdin to PULSO_DEBUG_FILE (default /tmp/pulso-stdin.json)
  *     on each render. Off by default so normal renders never touch disk.
+ *   - Mem line thresholds (yellow 5120MB / red 6656MB on the largest single
+ *     process) match the claude-guard.ps1 watchdog so the statusline and the
+ *     watchdog agree on when a session is worth resuming.
  */
 
-import { existsSync, readdirSync, readFileSync, statSync, openSync, readSync, closeSync, writeFileSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { existsSync, readdirSync, readFileSync, writeFileSync, statSync, openSync, readSync, closeSync } from "node:fs";
+import { homedir, tmpdir, hostname } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 
@@ -280,6 +287,17 @@ function printSkillsLine(active) {
   process.stdout.write(line + "\n");
 }
 
+function shortPath(p) {
+  if (!p) return null;
+  const home = homedir();
+  let s = String(p);
+  if (s.toLowerCase().startsWith(home.toLowerCase())) s = "~" + s.slice(home.length);
+  s = s.replace(/\\/g, "/");
+  const segs = s.split("/").filter(Boolean);
+  if (segs.length > 3) s = segs[0] + "/…/" + segs.slice(-2).join("/");
+  return s;
+}
+
 function printTokenLine(stdin, mcpCount, hkCount, hudShown) {
   const usage = stdin?.context_window?.current_usage || {};
   const cached = usage.cache_read_input_tokens || 0;
@@ -287,12 +305,19 @@ function printTokenLine(stdin, mcpCount, hkCount, hudShown) {
   const total = cached + fresh;
   const ctxPct = stdin?.context_window?.used_percentage;
   const ctxColor = ctxPct == null ? C.gray : ctxPct >= 80 ? C.red : ctxPct >= 50 ? C.yellow : C.green;
-  const parts = [
+  const parts = [];
+  let host = "";
+  try { host = hostname().toLowerCase(); } catch { /* keep statusline alive */ }
+  const cwd = shortPath(stdin?.workspace?.current_dir || stdin?.cwd || process.cwd());
+  if (host || cwd) {
+    parts.push(`${wrap(C.bold + C.green, host)}${wrap(C.dim, ":")}${wrap(C.cyan, cwd || "?")}`);
+  }
+  parts.push(
     wrap(C.magenta, "tok"),
     `${wrap(C.dim, "cached:")}${wrap(C.cyan, fmtNum(cached))}`,
     `${wrap(C.dim, "new:")}${wrap(C.yellow, fmtNum(fresh))}`,
     `${wrap(C.dim, "total:")}${wrap(C.white, fmtNum(total))}`,
-  ];
+  );
   // ctx% is shown by the OMC HUD line; only render it here in standalone mode.
   if (!hudShown && ctxPct != null) parts.push(`${wrap(C.dim, "ctx:")}${wrap(ctxColor, ctxPct + "%")}`);
   parts.push(`${wrap(C.dim, "mcp:")}${wrap(C.magenta, mcpCount + "x")}`);
@@ -414,6 +439,74 @@ function runHudSync(rawStdin, hudPath) {
   } catch { return false; }
 }
 
+// ---------------------------------------------------------------------------
+// Memory segment: shows the biggest single Claude/node process (the leak
+// signal), total node, and total claude.exe. Computed natively from one
+// tasklist call (no PowerShell per render), throttled with a ~3s temp-file
+// cache so it stays snappy, and silent-fail like the rest of the statusline.
+// Windows-only (tasklist); silently absent everywhere else. Thresholds match
+// claude-guard.ps1: warn (yellow) at 5120 MB, crit (red) at 6656 MB on the
+// largest single process.
+// ---------------------------------------------------------------------------
+function fmtMB(mb) {
+  if (mb >= 1024) return (mb / 1024).toFixed(1) + "G";
+  return Math.round(mb) + "M";
+}
+
+function computeClaudeMem() {
+  const res = spawnSync("tasklist", ["/fo", "csv", "/nh"], {
+    encoding: "utf8", timeout: 2500, windowsHide: true,
+  });
+  if (res.status !== 0 || !res.stdout) return null;
+  let nodeKB = 0, claudeKB = 0, maxKB = 0;
+  for (const line of res.stdout.split("\n")) {
+    if (!line) continue;
+    // CSV (no header): "Image","PID","Session","Session#","Mem Usage"
+    const cols = line.split('","');
+    if (cols.length < 5) continue;
+    const img = cols[0].replace(/^"/, "").toLowerCase();
+    const isNode = img === "node.exe";
+    const isClaude = img === "claude.exe";
+    if (!isNode && !isClaude) continue;
+    const kb = parseInt(cols[4].replace(/[^\d]/g, ""), 10);
+    if (!kb || isNaN(kb)) continue;
+    if (isNode) nodeKB += kb;
+    if (isClaude) claudeKB += kb;
+    if (kb > maxKB) maxKB = kb;
+  }
+  if (nodeKB === 0 && claudeKB === 0) return null;
+  const maxMB = maxKB / 1024;
+  const topColor = maxMB >= 6656 ? C.red : maxMB >= 5120 ? C.yellow : C.green;
+  const parts = [
+    wrap(C.magenta, "mem"),
+    `${wrap(C.dim, "top:")}${wrap(topColor, fmtMB(maxMB))}`,
+    `${wrap(C.dim, "node:")}${wrap(C.cyan, fmtMB(nodeKB / 1024))}`,
+  ];
+  if (claudeKB > 0) parts.push(`${wrap(C.dim, "claude:")}${wrap(C.cyan, fmtMB(claudeKB / 1024))}`);
+  if (maxMB >= 5120) parts.push(wrap(C.red, "resume?"));
+  return parts.join(" ");
+}
+
+function printMemLine() {
+  try {
+    const cachePath = join(tmpdir(), "pulso-mem.json");
+    let line = null;
+    try {
+      const o = JSON.parse(readFileSync(cachePath, "utf8"));
+      if (o && typeof o.ts === "number" && (Date.now() - o.ts) < 3000 && typeof o.line === "string") {
+        line = o.line;
+      }
+    } catch { /* no/stale cache */ }
+    if (line == null) {
+      line = computeClaudeMem();
+      if (line != null) {
+        try { writeFileSync(cachePath, JSON.stringify({ ts: Date.now(), line })); } catch { /* ignore */ }
+      }
+    }
+    if (line) process.stdout.write(line + "\n");
+  } catch { /* silent: never break the statusline */ }
+}
+
 async function main() {
   const raw = await bufferStdin();
   writeDiagnostic(raw);
@@ -428,6 +521,7 @@ async function main() {
   printTokenLine(stdin, inspect.mcpCount, inspect.hkCount, hudShown);
   printModelLine(stdin, hudShown);
   printSessionLine(stdin, hudShown);
+  printMemLine();
   runHudSync(raw, hudPath);
   printSkillsLine(inspect.lastSkill);
 }

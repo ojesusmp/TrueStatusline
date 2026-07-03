@@ -1,20 +1,21 @@
 # pulso
 
-> Five-line Claude Code statusline. Tokens, model + reasoning effort, session rate-limits + cost, MCP and hook counts, soft-wrapped enabled-skills list with active-skill highlight.
+> Six-line Claude Code statusline. Host:path, tokens, model + reasoning effort, session rate-limits + cost, memory-leak watch, MCP and hook counts, soft-wrapped enabled-skills list with active-skill highlight.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
 [![Marketplace](https://img.shields.io/badge/Claude%20Code-Marketplace-7c3aed)](#install)
 [![npm](https://img.shields.io/badge/npx-github%3Aojesusmp%2Fpulso-cb3837)](#c-npm--npx)
 
 ```
-tok cached:50.2k new:1.0k total:51.2k ctx:42% mcp:3x hk:5x
+myhost:~/skill-hardener tok cached:50.2k new:1.0k total:51.2k ctx:42% mcp:3x hk:5x
 mdl:Opus 4.7[1m] v2.1.90 fx:high think:on
 5h:24% (in 4h12m)  7d:41% (in 5d3h)  $0.12  +156/-23  9m4s
+mem top:1.2G node:1.4G claude:0.8G
 [OMC HUD line, if oh-my-claudecode is installed]
 skills: pulso · oh-my-claudecode · silex · ... [active: pulso]
 ```
 
-Lines 2–4 collapse silently when their data is absent — free tier sees fewer rows; Opus 1M-context user sees them all.
+Lines 2–5 collapse silently when their data is absent — free tier sees fewer rows; Opus 1M-context user sees them all. The mem line (4) is Windows-only (uses `tasklist`) and silently absent elsewhere; it turns yellow at 5120MB and red with a `resume?` warning at 6656MB on the largest single node/claude process.
 
 When the oh-my-claudecode HUD line is present, pulso de-duplicates against it: the fields the HUD already shows (model name, `ctx%`, `5h`/`7d` rate limits, session duration) are dropped from pulso's own lines, leaving only what the HUD doesn't render (token breakdown, CC version, `[1m]`, effort, thinking, cost, diff). Without the HUD, pulso shows everything (as in the example above).
 
@@ -72,13 +73,14 @@ pulso uninstall
 
 ## What it shows
 
-Five layers, top to bottom — see [skills/pulso/SKILL.md](./skills/pulso/SKILL.md) for the full field reference.
+Six layers, top to bottom — see [skills/pulso/SKILL.md](./skills/pulso/SKILL.md) for the full field reference.
 
 | Line | Source | Color logic |
 |---|---|---|
-| **token** | `context_window.current_usage` | `ctx%` green/yellow/red @ 50/80 |
+| **token** (+ host:path) | `os.hostname()`, `workspace.current_dir`, `context_window.current_usage` | `ctx%` green/yellow/red @ 50/80 |
 | **model** | `model`, `effort`, `thinking`, `output_style`, `version` | `fx:` gray→cyan→yellow→red across `low/medium/high/xhigh/max` |
 | **session** | `cost`, `rate_limits` | rate-limit % at 50/80; cost yellow ≥$1, red ≥$5 |
+| **mem** (Windows only) | `tasklist` (biggest node/claude process) | green/yellow/red @ 5120/6656MB, `resume?` at red |
 | **OMC HUD** | upstream child process | OMC's own colors |
 | **skills** | `enabledPlugins` + transcript scan | active skill bold cyan |
 

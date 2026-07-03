@@ -1,7 +1,7 @@
 {
   "name": "pulso",
-  "description": "Five-line Claude Code statusline: tokens, model + reasoning effort + thinking + Claude Code version, session rate-limits + cost + diff impact + duration, MCP and hook counts, and a soft-wrapped enabled-skills list with active-skill highlight. Auto-wires on SessionStart -- no manual install step.",
-  "version": "1.4.0",
+  "description": "Six-line Claude Code statusline: host:path + tokens, model + reasoning effort + thinking + Claude Code version, session rate-limits + cost + diff impact + duration, memory-leak watch, MCP and hook counts, and a soft-wrapped enabled-skills list with active-skill highlight. Auto-wires on SessionStart -- no manual install step.",
+  "version": "1.5.0",
   "author": {
     "name": "Orlando Molina",
     "url": "https://github.com/ojesusmp"
