@@ -2,6 +2,21 @@
 
 All notable changes to pulso are documented in this file. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] — 2026-07-03
+
+### Added
+
+- **`host:path` prefix** on the token line — hostname (lowercased) + a shortened working directory (`~`-relative, truncated to first + last two path segments when deep). Always renders when either is available; independent of OMC-HUD de-duplication (the HUD shows neither).
+- **Memory-leak watch line** — the biggest single `node.exe`/`claude.exe` process, plus totals for each, computed from one `tasklist` call per render (throttled with a ~3s temp-file cache). Color-coded yellow at 5120MB / red at 6656MB on the largest single process, with a `resume?` warning at the red threshold — thresholds match the `claude-guard.ps1` watchdog so the statusline and the watchdog agree on when a session is worth resuming. Windows-only (`tasklist`); silently absent on platforms without it, same silent-fail convention as the rest of the file.
+
+### Fixed
+
+- **Fleet drift**: this repo had fallen behind the hand-maintained `oj-statusline.mjs` copies running on Orlando's actual machines, which had independently gained both features above. This release ports them back into the canonical `pulso` source so there is one real, installable artifact instead of N hand-copies — see engram project `pulso` for the reconciliation history.
+
+### Notes
+
+- Verified with the synthetic-payload command in the README/SKILL.md, run three independent times (full payload, repeat, and an empty/free-tier payload) — all lines render once, no duplication, graceful degradation confirmed on missing fields.
+
 ## [1.4.0] — 2026-06-08
 
 ### Added

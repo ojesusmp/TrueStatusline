@@ -6,15 +6,15 @@
     "url": "https://github.com/ojesusmp"
   },
   "metadata": {
-    "description": "Pulso — five-line Claude Code statusline: tokens, model + reasoning effort + thinking, session rate-limits + cost + diff impact, MCP and hook counts, and a soft-wrapped enabled-skills list with active-skill highlight.",
-    "version": "1.4.0"
+    "description": "Pulso — six-line Claude Code statusline: host:path + tokens, model + reasoning effort + thinking, session rate-limits + cost + diff impact, memory-leak watch, MCP and hook counts, and a soft-wrapped enabled-skills list with active-skill highlight.",
+    "version": "1.5.0"
   },
   "plugins": [
     {
       "name": "pulso",
       "source": "./",
-      "description": "Five-line Claude Code statusline: token breakdown (cached/new/total/ctx%), model + reasoning effort + thinking + Claude Code version, session rate-limits + cost + diff impact + duration, MCP and hook counts, and a soft-wrapped enabled-skills list with active-skill highlight. Auto-wires on SessionStart with idempotent silent install. Ships /pulso:setup slash command for explicit one-shot setup. Optionally delegates to oh-my-claudecode HUD when present.",
-      "version": "1.4.0",
+      "description": "Six-line Claude Code statusline: host:path prefix, token breakdown (cached/new/total/ctx%), model + reasoning effort + thinking + Claude Code version, session rate-limits + cost + diff impact + duration, memory-leak watch (biggest node/claude process + resume warning, Windows), MCP and hook counts, and a soft-wrapped enabled-skills list with active-skill highlight. Auto-wires on SessionStart with idempotent silent install. Ships /pulso:setup slash command for explicit one-shot setup. Optionally delegates to oh-my-claudecode HUD when present.",
+      "version": "1.5.0",
       "author": {
         "name": "Orlando Molina",
         "url": "https://github.com/ojesusmp"
