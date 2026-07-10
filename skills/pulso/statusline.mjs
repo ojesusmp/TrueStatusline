@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // PERMANENT - pulso
-// pulso v1.5.0
+// pulso v1.5.1
 /**
  * pulso — Claude Code statusline.
  * Author: Orlando Molina <https://github.com/ojesusmp>
@@ -411,6 +411,10 @@ function findHudPath() {
     ];
     for (const p of devPaths) if (existsSync(p)) return p;
   }
+  // Delegate only when oh-my-claudecode is actually ENABLED. A cache dir left
+  // on disk after /plugin disable must not resurrect the OMC HUD (it would
+  // also suppress pulso's own mdl/ctx/5h/7d/duration lines).
+  if (!readEnabledPlugins().some(p => p.startsWith("oh-my-claudecode"))) return null;
   const configDir = process.env.CLAUDE_CONFIG_DIR || join(home, ".claude");
   const base = join(configDir, "plugins", "cache", "omc", "oh-my-claudecode");
   if (existsSync(base)) {
